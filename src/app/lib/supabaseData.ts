@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient, type User as SupabaseAuthUser } from "@supabase/supabase-js";
 
 export type SystemRole = "user" | "admin";
 export type AccountType = "resident" | "official" | "super_admin";
@@ -417,6 +417,61 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, fallbackMe
   }
 };
 
+const createProfileFromAuthUser = async (
+  authUser: SupabaseAuthUser,
+  fallback?: Partial<{
+    email: string;
+    name: string;
+    role: SystemRole;
+    accountType: AccountType;
+    verificationStatus: VerificationStatus;
+    contactNumber: string;
+    address: string;
+    position: OfficialPosition;
+    accessCode: string;
+  }>,
+) => {
+  const client = requireSupabase();
+  const metadata = (authUser.user_metadata ?? {}) as Record<string, unknown>;
+
+  const email = (fallback?.email ?? authUser.email ?? "").trim().toLowerCase();
+  const name = String(fallback?.name ?? metadata.name ?? "").trim();
+  const role = (fallback?.role ?? metadata.role) as SystemRole | undefined;
+  const accountType = (fallback?.accountType ?? metadata.accountType) as AccountType | undefined;
+  const verificationStatus = (fallback?.verificationStatus ?? metadata.verificationStatus ?? "approved") as VerificationStatus;
+  const contactNumber = String(fallback?.contactNumber ?? metadata.contactNumber ?? "").trim();
+  const address = String(fallback?.address ?? metadata.address ?? "").trim();
+  const position = (fallback?.position ?? metadata.position) as OfficialPosition | undefined;
+  const accessCode = String(fallback?.accessCode ?? metadata.accessCode ?? "").trim().toUpperCase();
+
+  if (!email || !name || !role || !accountType || !accessCode) {
+    throw new Error("Profile metadata is incomplete.");
+  }
+
+  const { error } = await client.from("profiles").upsert(
+    {
+      id: authUser.id,
+      email,
+      name,
+      role,
+      barangay: DEFAULT_BARANGAY_NAME,
+      auth_id: accessCode,
+      account_type: accountType,
+      verification_status: verificationStatus,
+      contact_number: contactNumber || null,
+      address: address || null,
+      position: position ?? null,
+      access_code: accessCode,
+      failed_login_attempts: 0,
+      locked_until: null,
+      is_active: true,
+    },
+    { onConflict: "id" },
+  );
+
+  if (error) throw error;
+};
+
 const fetchProfile = async (userId: string) => {
   const client = requireSupabase();
   const { data, error } = await client.from("profiles").select("*").eq("id", userId).single<ProfileRow>();
@@ -563,31 +618,71 @@ export const login = async (input: LoginInput): Promise<AuthResponse> => {
   suppressAuthHydration = true;
 
   try {
-    const { data, error } = await withTimeout(
-      client.auth.signInWithPassword({ email, password: input.password }),
-      BOOTSTRAP_TIMEOUT_MS,
-      "Login timed out. Please try again.",
-    );
-    if (error || !data.user) return { user: null, error: "Incorrect email or password." };
+    try {
+      const { data, error } = await withTimeout(
+        client.auth.signInWithPassword({ email, password: input.password }),
+        BOOTSTRAP_TIMEOUT_MS,
+        "Login timed out. Please try again.",
+      );
+      if (error || !data.user) return { user: null, error: "Incorrect email or password." };
 
-    const currentUser = await fetchProfile(data.user.id);
-    if (currentUser.isActive === false) {
-      await client.auth.signOut();
-      return { user: null, error: "This account has been deactivated." };
-    }
-    if (currentUser.lockedUntil && new Date(currentUser.lockedUntil).getTime() > Date.now()) {
-      await client.auth.signOut();
-      return { user: null, error: "Account is temporarily locked due to repeated failed login attempts." };
-    }
-    if (currentUser.verificationStatus !== "approved") {
-      await client.auth.signOut();
-      return { user: null, error: "Your account is pending approval." };
-    }
+      let currentUser: User;
+      try {
+        currentUser = await withTimeout(
+          fetchProfile(data.user.id),
+          BOOTSTRAP_TIMEOUT_MS,
+          "Profile loading timed out. Please try again.",
+        );
+      } catch (profileError) {
+        const message = profileError instanceof Error ? profileError.message.toLowerCase() : "";
+        if (
+          message.includes("0 rows")
+          || message.includes("json object requested")
+          || message.includes("profile metadata is incomplete")
+        ) {
+          await withTimeout(
+            createProfileFromAuthUser(data.user),
+            BOOTSTRAP_TIMEOUT_MS,
+            "Profile creation timed out. Please try again.",
+          );
+          currentUser = await withTimeout(
+            fetchProfile(data.user.id),
+            BOOTSTRAP_TIMEOUT_MS,
+            "Profile loading timed out. Please try again.",
+          );
+        } else {
+          throw profileError;
+        }
+      }
 
-    cacheCurrentUser(currentUser);
-    cacheSystemSettings(getSystemSettings());
-    hydrateUserContextInBackground(currentUser);
-    return { user: currentUser };
+      if (currentUser.isActive === false) {
+        await client.auth.signOut();
+        return { user: null, error: "This account has been deactivated." };
+      }
+      if (currentUser.lockedUntil && new Date(currentUser.lockedUntil).getTime() > Date.now()) {
+        await client.auth.signOut();
+        return { user: null, error: "Account is temporarily locked due to repeated failed login attempts." };
+      }
+      if (currentUser.verificationStatus !== "approved") {
+        await client.auth.signOut();
+        return { user: null, error: "Your account is pending approval." };
+      }
+
+      cacheCurrentUser(currentUser);
+      cacheSystemSettings(getSystemSettings());
+      hydrateUserContextInBackground(currentUser);
+      return { user: currentUser };
+    } catch (error) {
+      await client.auth.signOut().catch(() => undefined);
+      const message = error instanceof Error ? error.message : "Unable to log in right now.";
+      if (message.toLowerCase().includes("profile")) {
+        return { user: null, error: "Your account setup is incomplete. Please sign up again or contact the administrator." };
+      }
+      if (message.toLowerCase().includes("timed out")) {
+        return { user: null, error: message };
+      }
+      return { user: null, error: "Unable to log in right now. Please try again." };
+    }
   } finally {
     suppressAuthHydration = false;
   }
@@ -637,6 +732,13 @@ export const registerUser = async (input: RegisterInput): Promise<AuthResponse> 
         options: {
           data: {
             name,
+            role: codeDetails.role,
+            accountType: codeDetails.accountType,
+            verificationStatus: "approved",
+            contactNumber,
+            address: address ?? "",
+            position: position ?? "",
+            accessCode: codeDetails.accessCode,
           },
         },
       }),
@@ -645,26 +747,24 @@ export const registerUser = async (input: RegisterInput): Promise<AuthResponse> 
     );
     if (error || !data.user) return { user: null, error: error?.message ?? "Unable to create the account right now." };
 
-    const verificationStatus: VerificationStatus = "approved";
-    const { error: profileError } = await client.from("profiles").insert({
-      id: data.user.id,
-      email,
-      name,
-      role: codeDetails.role,
-      barangay: DEFAULT_BARANGAY_NAME,
-      auth_id: codeDetails.accessCode,
-      account_type: codeDetails.accountType,
-      verification_status: verificationStatus,
-      contact_number: contactNumber,
-      address: address ?? null,
-      position: position ?? null,
-      access_code: codeDetails.accessCode,
-      failed_login_attempts: 0,
-      locked_until: null,
-      is_active: true,
-    });
-    if (profileError) {
-      const profileErrorMessage = profileError.message.toLowerCase();
+    try {
+      await withTimeout(
+        createProfileFromAuthUser(data.user, {
+          email,
+          name,
+          role: codeDetails.role,
+          accountType: codeDetails.accountType,
+          verificationStatus: "approved",
+          contactNumber,
+          address,
+          position,
+          accessCode: codeDetails.accessCode,
+        }),
+        BOOTSTRAP_TIMEOUT_MS,
+        "Profile creation timed out. Please try again.",
+      );
+    } catch (profileError) {
+      const profileErrorMessage = profileError instanceof Error ? profileError.message.toLowerCase() : "";
       if (profileErrorMessage.includes("access_code") || profileErrorMessage.includes("duplicate key")) {
         return { user: null, error: "The access code you entered is incorrect or does not exist." };
       }
