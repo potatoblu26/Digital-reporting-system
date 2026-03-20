@@ -563,7 +563,11 @@ export const login = async (input: LoginInput): Promise<AuthResponse> => {
   suppressAuthHydration = true;
 
   try {
-    const { data, error } = await client.auth.signInWithPassword({ email, password: input.password });
+    const { data, error } = await withTimeout(
+      client.auth.signInWithPassword({ email, password: input.password }),
+      BOOTSTRAP_TIMEOUT_MS,
+      "Login timed out. Please try again.",
+    );
     if (error || !data.user) return { user: null, error: "Incorrect email or password." };
 
     const currentUser = await fetchProfile(data.user.id);
@@ -626,15 +630,19 @@ export const registerUser = async (input: RegisterInput): Promise<AuthResponse> 
   suppressAuthHydration = true;
 
   try {
-    const { data, error } = await client.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          name,
+    const { data, error } = await withTimeout(
+      client.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            name,
+          },
         },
-      },
-    });
+      }),
+      BOOTSTRAP_TIMEOUT_MS,
+      "Registration timed out. Please try again.",
+    );
     if (error || !data.user) return { user: null, error: error?.message ?? "Unable to create the account right now." };
 
     const verificationStatus: VerificationStatus = "approved";

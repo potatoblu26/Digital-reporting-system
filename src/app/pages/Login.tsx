@@ -267,54 +267,60 @@ export default function Login() {
   const onLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const result = await login({ email: loginEmail, password: loginPassword });
-    setLoading(false);
+    try {
+      const result = await login({ email: loginEmail, password: loginPassword });
 
-    if (!result.user) {
-      toast.error(translateError(result.error ?? "Incorrect email or password.", language));
-      return;
+      if (!result.user) {
+        toast.error(translateError(result.error ?? "Incorrect email or password.", language));
+        return;
+      }
+
+      toast.success(t.loginSuccess);
+      navigate(getDashboardPath(result.user));
+    } finally {
+      setLoading(false);
     }
-
-    toast.success(t.loginSuccess);
-    navigate(getDashboardPath(result.user));
   };
 
   const onSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const result = await registerUser({
-      name: signupName,
-      email: signupEmail,
-      password: signupPassword,
-      confirmPassword: signupConfirmPassword,
-      accessCode: signupAccessCode,
-      contactNumber: signupContactNumber,
-      address: signupAddress,
-      houseNo: signupHouseNo,
-      street: signupStreet,
-      purokZone: signupPurokZone,
-      position: signupPosition || undefined,
-    });
-    setLoading(false);
+    try {
+      const result = await registerUser({
+        name: signupName,
+        email: signupEmail,
+        password: signupPassword,
+        confirmPassword: signupConfirmPassword,
+        accessCode: signupAccessCode,
+        contactNumber: signupContactNumber,
+        address: signupAddress,
+        houseNo: signupHouseNo,
+        street: signupStreet,
+        purokZone: signupPurokZone,
+        position: signupPosition || undefined,
+      });
 
-    if (!result.user && result.error) {
-      toast.error(translateError(result.error, language));
-      return;
+      if (!result.user && result.error) {
+        toast.error(translateError(result.error, language));
+        return;
+      }
+
+      toast.success(t.signupSuccess);
+      setMode("login");
+      setSignupName("");
+      setSignupEmail("");
+      setSignupContactNumber("");
+      setSignupAccessCode("");
+      setSignupAddress("");
+      setSignupHouseNo("");
+      setSignupStreet("");
+      setSignupPurokZone("");
+      setSignupPosition("");
+      setSignupPassword("");
+      setSignupConfirmPassword("");
+    } finally {
+      setLoading(false);
     }
-
-    toast.success(t.signupSuccess);
-    setMode("login");
-    setSignupName("");
-    setSignupEmail("");
-    setSignupContactNumber("");
-    setSignupAccessCode("");
-    setSignupAddress("");
-    setSignupHouseNo("");
-    setSignupStreet("");
-    setSignupPurokZone("");
-    setSignupPosition("");
-    setSignupPassword("");
-    setSignupConfirmPassword("");
   };
 
   return (
