@@ -461,11 +461,15 @@ const refreshSystemSettings = async () => {
   return settings;
 };
 
-const hydrateUserContext = async (userId: string) => {
-  const currentUser = await fetchProfile(userId);
+const hydrateCachedData = async (currentUser: User) => {
   cacheCurrentUser(currentUser);
   await Promise.all([refreshReports(currentUser), refreshAnnouncements(), refreshSystemSettings(), refreshUsers(currentUser)]);
   return currentUser;
+};
+
+const hydrateUserContext = async (userId: string) => {
+  const currentUser = await fetchProfile(userId);
+  return hydrateCachedData(currentUser);
 };
 
 export const initializeAppData = async () => {
@@ -526,30 +530,31 @@ export const login = async (input: LoginInput): Promise<AuthResponse> => {
   if (!email || !input.password) return { user: null, error: "Please enter your registered email and password." };
 
   const client = requireSupabase();
-  const { error } = await client.auth.signInWithPassword({ email, password: input.password });
-  if (error) return { user: null, error: "Incorrect email or password." };
+  suppressAuthHydration = true;
 
-  const {
-    data: { user: authUser },
-  } = await client.auth.getUser();
-  if (!authUser) return { user: null, error: "Incorrect email or password." };
+  try {
+    const { data, error } = await client.auth.signInWithPassword({ email, password: input.password });
+    if (error || !data.user) return { user: null, error: "Incorrect email or password." };
 
-  const currentUser = await fetchProfile(authUser.id);
-  if (currentUser.isActive === false) {
-    await client.auth.signOut();
-    return { user: null, error: "This account has been deactivated." };
-  }
-  if (currentUser.lockedUntil && new Date(currentUser.lockedUntil).getTime() > Date.now()) {
-    await client.auth.signOut();
-    return { user: null, error: "Account is temporarily locked due to repeated failed login attempts." };
-  }
-  if (currentUser.verificationStatus !== "approved") {
-    await client.auth.signOut();
-    return { user: null, error: "Your account is pending approval." };
-  }
+    const currentUser = await fetchProfile(data.user.id);
+    if (currentUser.isActive === false) {
+      await client.auth.signOut();
+      return { user: null, error: "This account has been deactivated." };
+    }
+    if (currentUser.lockedUntil && new Date(currentUser.lockedUntil).getTime() > Date.now()) {
+      await client.auth.signOut();
+      return { user: null, error: "Account is temporarily locked due to repeated failed login attempts." };
+    }
+    if (currentUser.verificationStatus !== "approved") {
+      await client.auth.signOut();
+      return { user: null, error: "Your account is pending approval." };
+    }
 
-  await hydrateUserContext(currentUser.id);
-  return { user: currentUser };
+    await hydrateCachedData(currentUser);
+    return { user: currentUser };
+  } finally {
+    suppressAuthHydration = false;
+  }
 };
 
 export const registerUser = async (input: RegisterInput): Promise<AuthResponse> => {
