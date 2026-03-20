@@ -177,6 +177,7 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const hasSupabaseConfig = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 const serverFunctionUrl = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/server/make-server-f8425d9e` : null;
 const BOOTSTRAP_TIMEOUT_MS = 6000;
+let suppressAuthHydration = false;
 
 const supabase: SupabaseClient | null = hasSupabaseConfig
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -506,6 +507,10 @@ export const subscribeToAuthChanges = (callback: () => void) => {
       callback();
       return;
     }
+    if (suppressAuthHydration) {
+      callback();
+      return;
+    }
     try {
       await withTimeout(hydrateUserContext(session.user.id), BOOTSTRAP_TIMEOUT_MS, "Timed out while updating your session.");
     } finally {
@@ -581,45 +586,53 @@ export const registerUser = async (input: RegisterInput): Promise<AuthResponse> 
   }
 
   const client = requireSupabase();
-  const { data: existingCode, error: codeError } = await client.from("profiles").select("id").eq("access_code", codeDetails.accessCode).maybeSingle();
-  if (codeError) return { user: null, error: "Unable to validate the access code right now." };
-  if (existingCode) return { user: null, error: "The access code you entered is incorrect or does not exist." };
+  suppressAuthHydration = true;
 
-  const { data, error } = await client.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        name,
+  try {
+    const { data, error } = await client.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          name,
+        },
       },
-    },
-  });
-  if (error || !data.user) return { user: null, error: error?.message ?? "Unable to create the account right now." };
+    });
+    if (error || !data.user) return { user: null, error: error?.message ?? "Unable to create the account right now." };
 
-  const verificationStatus: VerificationStatus = "approved";
-  const { error: profileError } = await client.from("profiles").insert({
-    id: data.user.id,
-    email,
-    name,
-    role: codeDetails.role,
-    barangay: DEFAULT_BARANGAY_NAME,
-    auth_id: codeDetails.accessCode,
-    account_type: codeDetails.accountType,
-    verification_status: verificationStatus,
-    contact_number: contactNumber,
-    address: address ?? null,
-    position: position ?? null,
-    access_code: codeDetails.accessCode,
-    failed_login_attempts: 0,
-    locked_until: null,
-    is_active: true,
-  });
-  if (profileError) return { user: null, error: "Unable to create the account profile right now." };
+    const verificationStatus: VerificationStatus = "approved";
+    const { error: profileError } = await client.from("profiles").insert({
+      id: data.user.id,
+      email,
+      name,
+      role: codeDetails.role,
+      barangay: DEFAULT_BARANGAY_NAME,
+      auth_id: codeDetails.accessCode,
+      account_type: codeDetails.accountType,
+      verification_status: verificationStatus,
+      contact_number: contactNumber,
+      address: address ?? null,
+      position: position ?? null,
+      access_code: codeDetails.accessCode,
+      failed_login_attempts: 0,
+      locked_until: null,
+      is_active: true,
+    });
+    if (profileError) {
+      const profileErrorMessage = profileError.message.toLowerCase();
+      if (profileErrorMessage.includes("access_code") || profileErrorMessage.includes("duplicate key")) {
+        return { user: null, error: "The access code you entered is incorrect or does not exist." };
+      }
+      return { user: null, error: "Unable to create the account profile right now." };
+    }
 
-  await client.auth.signOut();
-  clearAppCaches();
-  cacheSystemSettings(defaultSystemSettings);
-  return { user: null };
+    await client.auth.signOut({ scope: "local" });
+    clearAppCaches();
+    cacheSystemSettings(defaultSystemSettings);
+    return { user: null };
+  } finally {
+    suppressAuthHydration = false;
+  }
 };
 
 export const logout = async () => {
