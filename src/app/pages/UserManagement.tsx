@@ -17,6 +17,7 @@ import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { useAppLanguage } from "../lib/appLanguage";
+import { useAppDataRefresh } from "../lib/useAppDataRefresh";
 import {
   deleteUserAccount,
   getCurrentUser,
@@ -32,6 +33,7 @@ import {
 const officialPositions: OfficialPosition[] = ["Barangay Captain", "Kagawad", "Secretary / Staff"];
 
 export default function UserManagement() {
+  useAppDataRefresh();
   const user = getCurrentUser();
   const { language } = useAppLanguage();
   const t = language === "tl"
