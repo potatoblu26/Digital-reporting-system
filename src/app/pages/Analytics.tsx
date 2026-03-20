@@ -18,6 +18,7 @@ import { AppShell } from "../components/AppShell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { useAppLanguage } from "../lib/appLanguage";
 import { getCurrentUser, getReports, getUsers } from "../lib/mockData";
+import { useAppDataRefresh } from "../lib/useAppDataRefresh";
 
 const chartColors = ["#0f766e", "#06b6d4", "#0ea5e9", "#10b981", "#f59e0b", "#64748b"];
 const reportCategories = ["Infrastructure", "Sanitation", "Public Safety", "Utilities", "Health", "Environment", "Other"];
@@ -28,6 +29,7 @@ const getMonthLabel = (date: Date) =>
   });
 
 export default function Analytics() {
+  useAppDataRefresh();
   const user = getCurrentUser();
   const { language } = useAppLanguage();
   const t = language === "tl"

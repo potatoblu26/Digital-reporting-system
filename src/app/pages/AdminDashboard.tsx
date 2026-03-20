@@ -62,6 +62,7 @@ import {
 } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { useAppLanguage } from "../lib/appLanguage";
+import { useAppDataRefresh } from "../lib/useAppDataRefresh";
 
 const chartColors = ["#0f766e", "#06b6d4", "#0ea5e9", "#10b981", "#f59e0b", "#64748b"];
 
@@ -79,6 +80,7 @@ const getMonthLabel = (date: Date) =>
   });
 
 export default function AdminDashboard() {
+  useAppDataRefresh();
   const navigate = useNavigate();
   const user = getCurrentUser();
   const { language } = useAppLanguage();

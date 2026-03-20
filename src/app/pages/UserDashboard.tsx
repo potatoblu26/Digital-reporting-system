@@ -4,8 +4,10 @@ import { Badge } from "../components/ui/badge";
 import { FileText, Clock, CheckCircle, AlertCircle } from "lucide-react";
 import { useAppLanguage } from "../lib/appLanguage";
 import { getAnnouncementsForCurrentUser, getCurrentUser, getReports } from "../lib/mockData";
+import { useAppDataRefresh } from "../lib/useAppDataRefresh";
 
 export default function UserDashboard() {
+  useAppDataRefresh();
   const user = getCurrentUser();
   const { language } = useAppLanguage();
   const t = language === "tl"

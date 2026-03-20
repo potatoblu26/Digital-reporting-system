@@ -7,8 +7,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { FileText, Search } from "lucide-react";
 import { useAppLanguage } from "../lib/appLanguage";
 import { getCurrentUser, getReports } from "../lib/mockData";
+import { useAppDataRefresh } from "../lib/useAppDataRefresh";
 
 export default function MyReports() {
+  useAppDataRefresh();
   const user = getCurrentUser();
   const { language } = useAppLanguage();
   const t = language === "tl"

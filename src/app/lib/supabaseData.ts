@@ -178,6 +178,7 @@ const hasSupabaseConfig = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 const serverFunctionUrl = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/server/make-server-f8425d9e` : null;
 const BOOTSTRAP_TIMEOUT_MS = 6000;
 let suppressAuthHydration = false;
+const DATA_UPDATES_EVENT = "app-data-updated";
 
 const supabase: SupabaseClient | null = hasSupabaseConfig
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -209,11 +210,19 @@ const readCache = <T>(key: string): T | null => {
   }
 };
 
-const writeCache = <T>(key: string, value: T) => {
-  localStorage.setItem(key, JSON.stringify(value));
+const emitDataUpdate = () => {
+  window.dispatchEvent(new CustomEvent(DATA_UPDATES_EVENT));
 };
 
-const clearCache = (key: string) => localStorage.removeItem(key);
+const writeCache = <T>(key: string, value: T) => {
+  localStorage.setItem(key, JSON.stringify(value));
+  emitDataUpdate();
+};
+
+const clearCache = (key: string) => {
+  localStorage.removeItem(key);
+  emitDataUpdate();
+};
 
 const normalizeSystemSettings = (settings: Partial<SystemSettings> | null | undefined): SystemSettings => ({
   barangayName: settings?.barangayName?.trim() || DEFAULT_BARANGAY_NAME,
@@ -374,6 +383,12 @@ export const getSystemSettings = (): SystemSettings => normalizeSystemSettings(r
 
 export const getSecurityAccounts = (): SecurityAccount[] => readCache<SecurityAccount[]>(CACHE_KEYS.securityAccounts) ?? [];
 
+export const subscribeToDataUpdates = (callback: () => void) => {
+  const handler = () => callback();
+  window.addEventListener(DATA_UPDATES_EVENT, handler);
+  return () => window.removeEventListener(DATA_UPDATES_EVENT, handler);
+};
+
 const requireSupabase = () => {
   if (!supabase) throw new Error("Missing Supabase environment variables.");
   return supabase;
@@ -472,6 +487,15 @@ const hydrateUserContext = async (userId: string) => {
   return hydrateCachedData(currentUser);
 };
 
+const hydrateUserContextInBackground = (user: User) => {
+  setTimeout(() => {
+    void hydrateCachedData(user).catch(() => {
+      cacheCurrentUser(user);
+      cacheSystemSettings(defaultSystemSettings);
+    });
+  }, 0);
+};
+
 export const initializeAppData = async () => {
   if (!supabase) return false;
   const client = requireSupabase();
@@ -504,7 +528,7 @@ export const initializeAppData = async () => {
 export const subscribeToAuthChanges = (callback: () => void) => {
   if (!supabase) return () => undefined;
   const client = requireSupabase();
-  const { data } = client.auth.onAuthStateChange(async (_event, session) => {
+  const { data } = client.auth.onAuthStateChange((_event, session) => {
     if (!session?.user) {
       clearAppCaches();
       cacheSystemSettings(defaultSystemSettings);
@@ -515,11 +539,17 @@ export const subscribeToAuthChanges = (callback: () => void) => {
       callback();
       return;
     }
-    try {
-      await withTimeout(hydrateUserContext(session.user.id), BOOTSTRAP_TIMEOUT_MS, "Timed out while updating your session.");
-    } finally {
-      callback();
-    }
+
+    setTimeout(() => {
+      void withTimeout(hydrateUserContext(session.user.id), BOOTSTRAP_TIMEOUT_MS, "Timed out while updating your session.")
+        .catch(() => {
+          clearAppCaches();
+          cacheSystemSettings(defaultSystemSettings);
+        })
+        .finally(() => {
+          callback();
+        });
+    }, 0);
   });
   return () => data.subscription.unsubscribe();
 };
@@ -550,7 +580,9 @@ export const login = async (input: LoginInput): Promise<AuthResponse> => {
       return { user: null, error: "Your account is pending approval." };
     }
 
-    await hydrateCachedData(currentUser);
+    cacheCurrentUser(currentUser);
+    cacheSystemSettings(getSystemSettings());
+    hydrateUserContextInBackground(currentUser);
     return { user: currentUser };
   } finally {
     suppressAuthHydration = false;

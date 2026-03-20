@@ -7,9 +7,11 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { useAppLanguage } from "../lib/appLanguage";
 import { getCurrentUser, getDashboardPath, getRoleLabel, updateCurrentUserProfile } from "../lib/mockData";
+import { useAppDataRefresh } from "../lib/useAppDataRefresh";
 import { toast } from "sonner";
 
 export default function Profile() {
+  useAppDataRefresh();
   const navigate = useNavigate();
   const user = getCurrentUser();
   const { language } = useAppLanguage();

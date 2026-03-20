@@ -12,10 +12,12 @@ import {
 } from "lucide-react";
 import { getCurrentUser, getDashboardPath, getRoleLabel, logout } from "../lib/mockData";
 import { useAppLanguage } from "../lib/appLanguage";
+import { useAppDataRefresh } from "../lib/useAppDataRefresh";
 import { toast } from "sonner";
 import { cn } from "./ui/utils";
 
 export function Navbar() {
+  useAppDataRefresh();
   const navigate = useNavigate();
   const user = getCurrentUser();
   const { language, setLanguage } = useAppLanguage();
