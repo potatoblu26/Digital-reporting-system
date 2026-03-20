@@ -8,6 +8,9 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
+    const fallbackTimer = setTimeout(() => {
+      if (active) setReady(true);
+    }, 7000);
 
     const boot = async () => {
       try {
@@ -27,6 +30,7 @@ export default function App() {
 
     return () => {
       active = false;
+      clearTimeout(fallbackTimer);
       unsubscribe();
     };
   }, []);

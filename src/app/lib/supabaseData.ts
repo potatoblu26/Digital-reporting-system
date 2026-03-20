@@ -176,6 +176,7 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const hasSupabaseConfig = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 const serverFunctionUrl = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/server/make-server-f8425d9e` : null;
+const BOOTSTRAP_TIMEOUT_MS = 6000;
 
 const supabase: SupabaseClient | null = hasSupabaseConfig
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -386,6 +387,20 @@ const clearAppCaches = () => {
   clearCache(CACHE_KEYS.securityAccounts);
 };
 
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, fallbackMessage: string): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(fallbackMessage)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+};
+
 const fetchProfile = async (userId: string) => {
   const client = requireSupabase();
   const { data, error } = await client.from("profiles").select("*").eq("id", userId).single<ProfileRow>();
@@ -455,20 +470,28 @@ const hydrateUserContext = async (userId: string) => {
 export const initializeAppData = async () => {
   if (!supabase) return false;
   const client = requireSupabase();
-  const {
-    data: { session },
-  } = await client.auth.getSession();
-  if (!session?.user) {
-    clearAppCaches();
-    cacheSystemSettings(defaultSystemSettings);
-    return true;
-  }
+
   try {
-    await hydrateUserContext(session.user.id);
+    const {
+      data: { session },
+    } = await withTimeout(client.auth.getSession(), BOOTSTRAP_TIMEOUT_MS, "Timed out while restoring your session.");
+
+    if (!session?.user) {
+      clearAppCaches();
+      cacheSystemSettings(defaultSystemSettings);
+      return true;
+    }
+
+    await withTimeout(hydrateUserContext(session.user.id), BOOTSTRAP_TIMEOUT_MS, "Timed out while loading your profile.");
     return true;
   } catch {
     clearAppCaches();
-    await client.auth.signOut();
+    cacheSystemSettings(defaultSystemSettings);
+    try {
+      await client.auth.signOut();
+    } catch {
+      // Ignore sign-out errors during bootstrap recovery.
+    }
     return false;
   }
 };
@@ -484,7 +507,7 @@ export const subscribeToAuthChanges = (callback: () => void) => {
       return;
     }
     try {
-      await hydrateUserContext(session.user.id);
+      await withTimeout(hydrateUserContext(session.user.id), BOOTSTRAP_TIMEOUT_MS, "Timed out while updating your session.");
     } finally {
       callback();
     }
