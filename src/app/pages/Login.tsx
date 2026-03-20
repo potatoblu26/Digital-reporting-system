@@ -220,6 +220,9 @@ const translateError = (message: string | undefined, language: Language) => {
     "The access code you entered is incorrect or does not exist.": "Mali ang access code na nilagay mo o wala ito sa system.",
     "Please enter a valid email address.": "Maglagay ng valid na email address.",
     "This email is already in use. Please log in or use another email.": "Gamit na ang email na ito. Mag-login o gumamit ng ibang email.",
+    "Please wait a moment before trying again.": "Maghintay muna sandali bago subukan ulit.",
+    "Unable to create the account right now.": "Hindi makagawa ng account ngayon. Subukan ulit maya-maya.",
+    "Unable to create the account profile right now.": "Hindi makumpleto ang account profile ngayon. Subukan ulit maya-maya.",
     "Passwords do not match.": "Hindi magkapareho ang passwords.",
     "Use a stronger password with at least 8 characters, uppercase, lowercase, and a number.":
       "Gumamit ng mas malakas na password na may hindi bababa sa 8 characters, malaking letra, maliit na letra, at numero.",
@@ -277,6 +280,8 @@ export default function Login() {
 
       toast.success(t.loginSuccess);
       navigate(getDashboardPath(result.user));
+    } catch {
+      toast.error(translateError("Unable to log in right now. Please try again.", language));
     } finally {
       setLoading(false);
     }
@@ -318,6 +323,8 @@ export default function Login() {
       setSignupPosition("");
       setSignupPassword("");
       setSignupConfirmPassword("");
+    } catch {
+      toast.error(translateError("Unable to create the account right now.", language));
     } finally {
       setLoading(false);
     }

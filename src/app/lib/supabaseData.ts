@@ -200,6 +200,23 @@ const passwordIsStrong = (password: string) => {
   return true;
 };
 
+const normalizeAuthErrorMessage = (message: string | undefined, fallback: string) => {
+  if (!message) return fallback;
+
+  const lowerMessage = message.toLowerCase();
+  if (lowerMessage.includes("user already registered")) {
+    return "This email is already in use. Please log in or use another email.";
+  }
+  if (lowerMessage.includes("email rate limit") || lowerMessage.includes("security purposes")) {
+    return "Please wait a moment before trying again.";
+  }
+  if (lowerMessage.includes("invalid login credentials")) {
+    return "Incorrect email or password.";
+  }
+
+  return message;
+};
+
 const readCache = <T>(key: string): T | null => {
   const value = localStorage.getItem(key);
   if (!value) return null;
@@ -624,7 +641,9 @@ export const login = async (input: LoginInput): Promise<AuthResponse> => {
         BOOTSTRAP_TIMEOUT_MS,
         "Login timed out. Please try again.",
       );
-      if (error || !data.user) return { user: null, error: "Incorrect email or password." };
+      if (error || !data.user) {
+        return { user: null, error: normalizeAuthErrorMessage(error?.message, "Incorrect email or password.") };
+      }
 
       let currentUser: User;
       try {
@@ -745,7 +764,9 @@ export const registerUser = async (input: RegisterInput): Promise<AuthResponse> 
       BOOTSTRAP_TIMEOUT_MS,
       "Registration timed out. Please try again.",
     );
-    if (error || !data.user) return { user: null, error: error?.message ?? "Unable to create the account right now." };
+    if (error || !data.user) {
+      return { user: null, error: normalizeAuthErrorMessage(error?.message, "Unable to create the account right now.") };
+    }
 
     try {
       await withTimeout(
