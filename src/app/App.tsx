@@ -10,8 +10,13 @@ export default function App() {
     let active = true;
 
     const boot = async () => {
-      await initializeAppData();
-      if (active) setReady(true);
+      try {
+        await initializeAppData();
+      } catch (error) {
+        console.error("App bootstrap failed", error);
+      } finally {
+        if (active) setReady(true);
+      }
     };
 
     boot();
