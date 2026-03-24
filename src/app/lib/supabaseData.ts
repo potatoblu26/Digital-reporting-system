@@ -768,30 +768,6 @@ export const registerUser = async (input: RegisterInput): Promise<AuthResponse> 
       return { user: null, error: normalizeAuthErrorMessage(error?.message, "Unable to create the account right now.") };
     }
 
-    try {
-      await withTimeout(
-        createProfileFromAuthUser(data.user, {
-          email,
-          name,
-          role: codeDetails.role,
-          accountType: codeDetails.accountType,
-          verificationStatus: "approved",
-          contactNumber,
-          address,
-          position,
-          accessCode: codeDetails.accessCode,
-        }),
-        BOOTSTRAP_TIMEOUT_MS,
-        "Profile creation timed out. Please try again.",
-      );
-    } catch (profileError) {
-      const profileErrorMessage = profileError instanceof Error ? profileError.message.toLowerCase() : "";
-      if (profileErrorMessage.includes("access_code") || profileErrorMessage.includes("duplicate key")) {
-        return { user: null, error: "The access code you entered is incorrect or does not exist." };
-      }
-      return { user: null, error: "Unable to create the account profile right now." };
-    }
-
     await client.auth.signOut({ scope: "local" });
     clearAppCaches();
     cacheSystemSettings(defaultSystemSettings);

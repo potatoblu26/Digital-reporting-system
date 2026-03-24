@@ -198,3 +198,126 @@ with check (
       and admin_profile.is_active = true
   )
 );
+
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  metadata jsonb := coalesce(new.raw_user_meta_data, '{}'::jsonb);
+  next_name text := nullif(trim(coalesce(metadata->>'name', '')), '');
+  next_role text := coalesce(nullif(metadata->>'role', ''), 'user');
+  next_account_type text := coalesce(nullif(metadata->>'accountType', ''), 'resident');
+  next_verification_status text := coalesce(nullif(metadata->>'verificationStatus', ''), 'approved');
+  next_contact_number text := nullif(trim(coalesce(metadata->>'contactNumber', '')), '');
+  next_address text := nullif(trim(coalesce(metadata->>'address', '')), '');
+  next_position text := nullif(trim(coalesce(metadata->>'position', '')), '');
+  next_access_code text := upper(nullif(trim(coalesce(metadata->>'accessCode', '')), ''));
+begin
+  if next_name is null then
+    next_name := split_part(coalesce(new.email, ''), '@', 1);
+  end if;
+
+  insert into public.profiles (
+    id,
+    email,
+    name,
+    role,
+    barangay,
+    auth_id,
+    account_type,
+    verification_status,
+    contact_number,
+    address,
+    position,
+    access_code,
+    failed_login_attempts,
+    locked_until,
+    is_active
+  )
+  values (
+    new.id,
+    lower(coalesce(new.email, '')),
+    next_name,
+    next_role::text,
+    'Barangay Digital Reporting System',
+    coalesce(next_access_code, new.id::text),
+    next_account_type::text,
+    next_verification_status::text,
+    next_contact_number,
+    next_address,
+    next_position,
+    next_access_code,
+    0,
+    null,
+    true
+  )
+  on conflict (id) do update
+  set
+    email = excluded.email,
+    name = excluded.name,
+    role = excluded.role,
+    barangay = excluded.barangay,
+    auth_id = excluded.auth_id,
+    account_type = excluded.account_type,
+    verification_status = excluded.verification_status,
+    contact_number = excluded.contact_number,
+    address = excluded.address,
+    position = excluded.position,
+    access_code = excluded.access_code,
+    failed_login_attempts = excluded.failed_login_attempts,
+    locked_until = excluded.locked_until,
+    is_active = excluded.is_active;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+
+create trigger on_auth_user_created
+after insert on auth.users
+for each row
+execute function public.handle_new_user();
+
+insert into public.profiles (
+  id,
+  email,
+  name,
+  role,
+  barangay,
+  auth_id,
+  account_type,
+  verification_status,
+  contact_number,
+  address,
+  position,
+  access_code,
+  failed_login_attempts,
+  locked_until,
+  is_active
+)
+select
+  u.id,
+  lower(coalesce(u.email, '')),
+  coalesce(nullif(trim(coalesce(u.raw_user_meta_data->>'name', '')), ''), split_part(coalesce(u.email, ''), '@', 1)),
+  coalesce(nullif(u.raw_user_meta_data->>'role', ''), 'user')::text,
+  'Barangay Digital Reporting System',
+  coalesce(upper(nullif(trim(coalesce(u.raw_user_meta_data->>'accessCode', '')), '')), u.id::text),
+  coalesce(nullif(u.raw_user_meta_data->>'accountType', ''), 'resident')::text,
+  coalesce(nullif(u.raw_user_meta_data->>'verificationStatus', ''), 'approved')::text,
+  nullif(trim(coalesce(u.raw_user_meta_data->>'contactNumber', '')), ''),
+  nullif(trim(coalesce(u.raw_user_meta_data->>'address', '')), ''),
+  nullif(trim(coalesce(u.raw_user_meta_data->>'position', '')), ''),
+  upper(nullif(trim(coalesce(u.raw_user_meta_data->>'accessCode', '')), '')),
+  0,
+  null,
+  true
+from auth.users u
+where not exists (
+  select 1
+  from public.profiles p
+  where p.id = u.id
+);
