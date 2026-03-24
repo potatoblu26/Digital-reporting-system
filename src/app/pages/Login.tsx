@@ -7,7 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { getCurrentUser, getDashboardPath, login, parseAccessCode, registerUser, type OfficialPosition } from "../lib/mockData";
+import { getCurrentUser, login, parseAccessCode, registerUser, type OfficialPosition } from "../lib/mockData";
+import { useAppDataRefresh } from "../lib/useAppDataRefresh";
 
 type AuthMode = "login" | "signup";
 type Language = "en" | "tl";
@@ -149,9 +150,9 @@ const content = {
     systemBehavior1: "Residents can submit reports and track report status.",
     systemBehavior2: "Barangay officials can view and manage reports and respond to complaints.",
     systemBehavior3: "Super admins can monitor users, manage access, and view system-wide reports.",
-    systemBehavior4: "Newly registered accounts must wait for verification before login access is granted.",
+    systemBehavior4: "Newly registered accounts must verify their email before login access is granted.",
     loginSuccess: "Login successful! Redirecting to your dashboard...",
-    signupSuccess: "Registration successful! Please wait for account verification before logging in.",
+    signupSuccess: "Registration successful! Please check your email and verify your account before logging in.",
   },
   tl: {
     systemName: "Barangay Digital Reporting System",
@@ -203,9 +204,9 @@ const content = {
     systemBehavior1: "Puwedeng magsumite ng report at i-check ang status nito.",
     systemBehavior2: "Puwedeng tingnan at asikasuhin ang mga report at reklamo.",
     systemBehavior3: "Puwedeng bantayan ang users, access, at buong system reports.",
-    systemBehavior4: "Ang bagong account ay kailangang ma-verify muna bago makapag-login.",
+    systemBehavior4: "Ang bagong account ay kailangang i-verify muna sa email bago makapag-login.",
     loginSuccess: "Successful ang login! Dinadala ka na sa dashboard mo...",
-    signupSuccess: "Successful ang registration! Hintayin muna ang verification bago mag-login.",
+    signupSuccess: "Successful ang registration! I-check ang email mo at i-verify muna bago mag-login.",
   },
 } as const;
 
@@ -215,6 +216,7 @@ const translateError = (message: string | undefined, language: Language) => {
   const translations: Record<string, string> = {
     "Incorrect email or password.": "Mali ang email o password.",
     "Your account is pending approval.": "Pending pa ang approval ng account mo.",
+    "Please verify your email before logging in.": "Paki-verify muna ang email mo bago mag-login.",
     "Please enter your registered email and password.": "Ilagay ang registered mong email at password.",
     "Please complete all signup fields.": "Pakikumpleto ang lahat ng kailangang fields.",
     "The access code you entered is incorrect or does not exist.": "Mali ang access code na nilagay mo o wala ito sa system.",
@@ -234,6 +236,7 @@ const translateError = (message: string | undefined, language: Language) => {
 };
 
 export default function Login() {
+  useAppDataRefresh();
   const [mode, setMode] = useState<AuthMode>("login");
   const [language, setLanguage] = useState<Language>("en");
   const [loading, setLoading] = useState(false);
@@ -259,13 +262,13 @@ export default function Login() {
   const infoPanels = localizedInfoPanels[language];
   const activePanel = infoPanels.find((panel) => panel.id === activeInfoPanel) ?? infoPanels[0];
   const t = content[language];
+  const currentUser = getCurrentUser();
 
   useEffect(() => {
-    const user = getCurrentUser();
-    if (user) {
-      navigate(getDashboardPath(user));
+    if (currentUser) {
+      navigate("/dashboard", { replace: true });
     }
-  }, [navigate]);
+  }, [currentUser, navigate]);
 
   const onLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -279,7 +282,7 @@ export default function Login() {
       }
 
       toast.success(t.loginSuccess);
-      navigate(getDashboardPath(result.user));
+      navigate("/dashboard", { replace: true });
     } catch {
       toast.error(translateError("Unable to log in right now. Please try again.", language));
     } finally {
@@ -310,7 +313,7 @@ export default function Login() {
         return;
       }
 
-      toast.success(t.signupSuccess);
+      toast.success(result.requiresEmailConfirmation ? t.signupSuccess : t.signupSuccess);
       setMode("login");
       setSignupName("");
       setSignupEmail("");
